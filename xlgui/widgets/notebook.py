@@ -24,6 +24,8 @@
 # do so. If you do not wish to do so, delete this exception statement
 # from your version.
 
+import math
+
 from gi.repository import GObject
 from gi.repository import Gdk
 from gi.repository import Gtk
@@ -156,6 +158,8 @@ class NotebookTab(Gtk.EventBox):
         self.menu = menu.ProviderMenu(self.menu_provider_name, self)
 
         self.connect('button-press-event', self.on_button_press)
+        self.connect('enter-notify-event', self.on_enter)
+        self.connect('leave-notify-event', self.on_leave)
 
         if display_left:
             box = Gtk.Box(False, 2, orientation=Gtk.Orientation.VERTICAL)
@@ -194,6 +198,10 @@ class NotebookTab(Gtk.EventBox):
             self.entry.set_no_show_all(True)
         
 
+        self.revealer = revealer = Gtk.Revealer()
+        revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_DOWN if display_left
+            else Gtk.RevealerTransitionType.SLIDE_LEFT)
         self.button = button = Gtk.Button()
         button.set_relief(Gtk.ReliefStyle.NONE)
         button.set_halign(Gtk.Align.CENTER)
@@ -203,10 +211,14 @@ class NotebookTab(Gtk.EventBox):
         button.add(Gtk.Image.new_from_icon_name('window-close-symbolic', Gtk.IconSize.MENU))
         button.connect('clicked', self.close)
         button.connect('button-press-event', self.on_button_press)
+        # When an event box's visible-window is false, leave-notify-event does
+        # not propagate from a child button.
+        button.connect('leave-notify-event', self.on_leave)
+        revealer.add(button)
         
         # pack the widgets in
         if display_left:
-            box.pack_start(button, False, False, 0)
+            box.pack_start(revealer, False, False, 0)
             box.pack_end(self.icon, False, False, 0)
             box.pack_end(self.label, True, True, 0)
             if self.can_rename():
@@ -217,7 +229,7 @@ class NotebookTab(Gtk.EventBox):
             box.pack_start(self.label, True, True, 0)
             if self.can_rename():
                 box.pack_start(self.entry, True, True, 0)
-            box.pack_end(button, False, False, 0)
+            box.pack_end(revealer, False, False, 0)
 
         page.set_tab(self)
         page.connect('name-changed', self.on_name_changed)
@@ -254,6 +266,24 @@ class NotebookTab(Gtk.EventBox):
             self.page.tab_menu.popup( None, None, None, None,
                     event.button, event.time)
             return True
+
+    def on_enter(self, *_):
+        self.revealer.set_reveal_child(True)
+
+    def on_leave(self, widget, event):
+        x, y = event.x, event.y
+        if widget != self:  # If the event is from the Close button
+            # Widget.translate_coordinates only takes and returns ints.
+            # Here we either round up or down depending on which side we are
+            # leaving to.
+            x = math.ceil(x) if x > 0 else math.floor(x)
+            y = math.ceil(y) if y > 0 else math.floor(y)
+            x, y = widget.translate_coordinates(self, x, y)
+
+        alloc = self.get_allocation()
+        if not (0 < x < alloc.width and
+                0 < y < alloc.height):
+            self.revealer.set_reveal_child(False)
 
     def on_entry_activate(self, entry):
         """
