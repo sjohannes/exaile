@@ -88,8 +88,8 @@ class ExailePlayer(object):
         
         # TODO: support other engines
         
-        from .gst.engine import ExaileGstEngine
-        self._engine = ExaileGstEngine(self._name, self)
+        from .vlc import VlcEngine
+        self._engine = VlcEngine(self._name, self)
         self._engine.initialize()
         
         #elif pname == 'rtfd_hack': # allows building docs
