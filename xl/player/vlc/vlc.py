@@ -48,6 +48,8 @@ def _init():
     func('libvlc_media_release', None, c.c_void_p)
 
     func('libvlc_media_player_get_length', c.c_int64, c.c_void_p)
+    func('libvlc_media_player_get_media', c.c_void_p, c.c_void_p)
+    func('libvlc_media_player_get_position', c.c_float, c.c_void_p)
     func('libvlc_media_player_get_state', c.c_int, c.c_void_p)
     func('libvlc_media_player_get_time', c.c_int64, c.c_void_p)
     func('libvlc_media_player_is_playing', c.c_int, c.c_void_p)
@@ -92,8 +94,19 @@ class State(int):
 
 
 class Vlc:
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
+        """
+        :param video: Enable video (default: True)
+        :type video: bool
+        :param audio: Enable audio (default: True)
+        :type audio: bool
+        """
         _init()
+        args = list(args)
+        if not kwargs.get('video', True):
+            args.append('--no-video')
+        if not kwargs.get('audio', True):
+            args.append('--no-audio')
         args = (ctypes.c_char_p * len(args))(*args)
         self._as_parameter_ = _ensure(libvlc_new(len(args), args))
 
@@ -102,103 +115,146 @@ class Vlc:
             libvlc_release(self)
 
 
-class Media:
-    def __init__(self, instance, path):
+class Media(object):
+    def __init__(self, vlc=None, path=None, libvlc_media=None):
         """
-        :type instance: Vlc
+        :type vlc: Vlc
         :type path: bytes
         """
-        assert isinstance(path, bytes)
-        self._as_parameter_ = _ensure(libvlc_media_new_path(instance, path))
+        if vlc:
+            assert isinstance(path, bytes)
+            self._as_parameter_ = _ensure(libvlc_media_new_path(vlc, path))
+        else:
+            self._as_parameter_ = _ensure(libvlc_media)
 
     def __del__(self):
         if hasattr(self, '_as_parameter_'):
             libvlc_media_release(self)
 
-    def get_state(self):
+    @property
+    def state(self):
         """
         :rtype: State
         """
         return State(libvlc_media_get_state(self))
 
 
-class MediaPlayer:
-    def __init__(self, instance):
+class MediaPlayer(object):
+    def __init__(self, vlc):
         """
-        :type instance: Vlc
+        :type vlc: Vlc
         """
-        self._as_parameter_ = _ensure(libvlc_media_player_new(instance))
+        self._as_parameter_ = _ensure(libvlc_media_player_new(vlc))
 
     def __del__(self):
         if hasattr(self, '_as_parameter_'):
             libvlc_media_player_release(self)
 
-    def get_state(self):
+    @property
+    def is_paused(self):
         """
-        :rtype: State
+        :rtype: bool
         """
-        return State(libvlc_media_player_get_state(self))
+        return self.state == State.PAUSED
 
-    def get_time(self):
+    @is_paused.setter
+    def is_paused(self, paused):
         """
-        :return: Playback time, in milliseconds
-        :rtype: int
+        :type paused: bool
         """
-        return libvlc_media_player_get_time(self)
+        libvlc_media_player_set_pause(self, int(paused))
 
-    def get_volume(self):
-        return libvlc_audio_get_volume(self)
-
+    @property
     def is_playing(self):
+        """
+        :rtype: bool
+        """
         return bool(libvlc_media_player_is_playing(self))
 
-    def pause(self):
-        libvlc_media_player_pause(self)
+    @property
+    def media(self):
+        """
+        :rtype: Media
+        """
+        return Media(libvlc_media=libvlc_media_player_get_media(self))
 
-    def play(self):
-        return libvlc_media_player_play(self)
-
-    def set_media(self, media):
+    @media.setter
+    def media(self, media):
         """
         :type media: Media
         """
         libvlc_media_player_set_media(self, media)
 
-    def set_pause(self, do_pause):
-        """
-        :type do_pause: bool
-        """
-        libvlc_media_player_set_pause(self, int(do_pause))
+    def play(self):
+        return libvlc_media_player_play(self)
 
-    def set_position(self, pos):
+    @property
+    def position(self):
+        """
+        :rtype: float
+        """
+        return libvlc_media_player_get_position(self)
+
+    @position.setter
+    def position(self, pos):
         """
         :type pos: float
         """
         libvlc_media_player_set_position(self, ctypes.c_float(pos))
 
-    def set_time(self, time_ms):
+    @property
+    def state(self):
         """
-        :type time_ms: int
+        :rtype: State
         """
-        libvlc_media_player_set_time(self, ctypes.c_int64(time_ms))
-
-    def set_volume(self, volume):
-        """
-        :type volume: int
-        """
-        assert isinstance(volume, int)
-        libvlc_audio_set_volume(self, volume)
+        return State(libvlc_media_player_get_state(self))
 
     def stop(self):
         libvlc_media_player_stop(self)
 
+    @property
+    def time(self):
+        """
+        :return: Playback time, in seconds
+        :rtype: float
+        """
+        return libvlc_media_player_get_time(self) / 1000.0  # From ms
+
+    @time.setter
+    def time(self, time):
+        """
+        :type time: float
+        """
+        libvlc_media_player_set_time(self, ctypes.c_int64(int(time * 1000)))
+
+    def toggle_pause(self):
+        libvlc_media_player_pause(self)
+
+    @property
+    def volume(self):
+        """Audio volume.
+
+        The normal value range is between 0 and 1. Higher numbers are accepted,
+        but may cause clipping.
+
+        :rtype: float
+        """
+        return libvlc_audio_get_volume(self) / 100.0
+
+    @volume.setter
+    def volume(self, volume):
+        """
+        :type volume: float
+        """
+        libvlc_audio_set_volume(self, int(volume * 100))
+
 
 if __name__ == '__main__':
     import sys
-    v = Vlc('--no-video')
+    v = Vlc(video=False)
     m = Media(v, sys.argv[1])
     p = MediaPlayer(v)
-    p.set_media(m)
+    p.media = m
     p.play()
     import time
     time.sleep(5)

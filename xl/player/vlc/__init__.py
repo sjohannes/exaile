@@ -22,7 +22,7 @@ from . import vlc
 
 class VlcEngine(ExaileEngine):
     def initialize(self):
-        self.vlc = vlc.Vlc('--no-video')
+        self.vlc = vlc.Vlc(video=False)
         self.mplayer = vlc.MediaPlayer(self.vlc)
         self.track = None
         self.player.engine_load_volume()
@@ -37,10 +37,10 @@ class VlcEngine(ExaileEngine):
         return self.track
 
     def get_position(self):
-        return self.mplayer.get_time() * 1e6  # From ms to ns
+        return self.mplayer.time * 1e9  # From s to ns
 
     def get_state(self):
-        state = self.mplayer.get_state()
+        state = self.mplayer.state
         if state in (vlc.State.BUFFERING, vlc.State.OPENING, vlc.State.PLAYING):
             return b'playing'
         if state == vlc.State.PAUSED:
@@ -51,13 +51,13 @@ class VlcEngine(ExaileEngine):
         assert False
 
     def get_volume(self):
-        return self.mplayer.get_volume() / 100
+        return self.mplayer.volume
 
     def on_track_stopoffset_changed(self, track):
         pass  # TODO
 
     def pause(self):
-        self.mplayer.set_pause(True)
+        self.mplayer.is_paused = True
 
     def play(self, track, start_at, paused):
         """
@@ -72,20 +72,20 @@ class VlcEngine(ExaileEngine):
         if prior_track:
             self.player.engine_notify_track_end(prior_track, False)
         self.track = track
-        self.mplayer.set_media(vlc.Media(self.vlc, track.get_local_path()))
+        self.mplayer.media = vlc.Media(self.vlc, track.get_local_path())
         self.mplayer.play()
         if start_at:
-            self.mplayer.set_time(int(start_at * 1000))
+            self.mplayer.time = start_at
         if paused:
-            self.mplayer.pause()  # TODO: Doesn't work
+            self.mplayer.toggle_pause()  # TODO: Doesn't work
         self.player.engine_notify_track_start(track)
         # TODO: Handle auto-advance
 
     def seek(self, value):
-        self.mplayer.set_time(int(value * 1000))
+        self.mplayer.time = value
 
     def set_volume(self, volume):
-        self.mplayer.set_volume(int(volume * 100))
+        self.mplayer.volume = volume
 
     def stop(self):
         track = self.track
@@ -94,4 +94,4 @@ class VlcEngine(ExaileEngine):
         self.player.engine_notify_track_end(track, True)
 
     def unpause(self):
-        self.mplayer.set_pause(False)
+        self.mplayer.is_paused = False
