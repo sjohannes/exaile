@@ -68,6 +68,8 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
         A popup window showing information
         of the currently playing track
     """
+    CSS_FORMAT = "GtkWindow { background: rgb(%d, %d, %d) }"
+
     autohide = GObject.property(
         type=GObject.TYPE_BOOLEAN,
         nick='autohide',
@@ -99,12 +101,12 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
         
         self.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
         self.set_title('Exaile OSD')
+        self.set_border_width(10)
         self.set_decorated(False)
         self.set_keep_above(True)
         self.set_skip_pager_hint(True)
         self.set_skip_taskbar_hint(True)
         self.set_resizable(True)
-        self.set_app_paintable(True)
         self.stick()
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.POINTER_MOTION_MASK)
 
@@ -112,8 +114,11 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
         self.__options = {
             'background': None,
             'display_duration': None,
-            'border_radius': None
         }
+
+        self.css = Gtk.CssProvider()
+        style = self.get_style_context()
+        style.add_provider(self.css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
 
         self.info_area = info.TrackInfoPane(player.PLAYER)
         self.info_area.set_default_text('')
@@ -125,13 +130,12 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
 
         # Trigger initial setup trough options
         for option in ('format', 'background', 'display_duration',
-                       'show_progress', 'position', 'width', 'height',
-                       'border_radius'):
+                       'show_progress', 'position', 'width', 'height'):
             self.on_option_set('plugin_osd_option_set', settings,
             'plugin/osd/{option}'.format(option=option))
 
-        # Trigger color map update
-        self.emit('screen-changed', self.get_screen())
+        '''# Trigger color map update
+        self.emit('screen-changed', self.get_screen())'''
 
         PlaybackAdapter.__init__(self, player.PLAYER)
 
@@ -167,7 +171,7 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
             finally:
                 self.fadeout_id = None
             
-            self.set_opacity(1)
+            self.set_opacity(self.__options['background'].alpha_float)
         
         Gtk.Window.show_all(self)
 
@@ -197,7 +201,18 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
             if self.props.autohide:
                 self.hide()
 
-    def do_expose_event(self, event):
+    '''def do_draw(self, context):
+        context.set_source_rgba(
+            self.__options['background'].red_float,
+            self.__options['background'].green_float,
+            self.__options['background'].blue_float,
+            self.__options['background'].alpha_float
+        )
+
+        context.set_operator(cairo.OPERATOR_SOURCE)
+        context.paint()'''
+
+    '''def do_expose_event(self, event):
         """
             Draws the background of the window
         """
@@ -216,9 +231,9 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
         context.set_operator(cairo.OPERATOR_SOURCE)
         context.paint()
 
-        Gtk.Window.do_expose_event(self, event)
+        Gtk.Window.do_expose_event(self, event)'''
 
-    def do_screen_changed(self, screen):
+    '''def do_screen_changed(self, screen):
         """
             Updates the used colormap
         """
@@ -228,9 +243,9 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
 
         self.unrealize()
         self.set_visual(visual)
-        self.realize()
+        self.realize()'''
 
-    def do_size_allocate(self, allocation):
+    '''def do_size_allocate(self, allocation):
         """
             Applies the non-rectangular shape
         """
@@ -259,7 +274,7 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
 
         self.shape_combine_mask(mask, 0, 0)
 
-        Gtk.Window.do_size_allocate(self, allocation)
+        Gtk.Window.do_size_allocate(self, allocation)'''
 
     def do_configure_event(self, e):
         """
@@ -278,7 +293,7 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
         """
         if e.button == 1:
             self.drag_origin = Point(e.x, e.y)
-            self.window.set_cursor(Gdk.Cursor.new(Gdk.CursorType.FLEUR))
+            self.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.FLEUR))
 
             return True
         elif e.button == 3 and e.state & Gdk.ModifierType.MOD1_MASK:
@@ -293,7 +308,7 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
             settings.set_option('plugin/osd/position', list(self.get_position()))
 
             self.drag_origin = None
-            self.window.set_cursor(Gdk.Cursor.new(Gdk.CursorType.ARROW))
+            self.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.ARROW))
 
             return True
 
@@ -397,9 +412,11 @@ class OSDWindow(Gtk.Window, PlaybackAdapter):
                 'by $artist\n'
                 'from $album')
             ))
-        if option == 'plugin/osd/background':
-            self.__options['background'] = alphacolor_parse(settings.get_option(option, '#333333cc'))
-            GLib.idle_add(self.queue_draw)
+        elif option == 'plugin/osd/background':
+            self.__options['background'] = bg = alphacolor_parse(settings.get_option(option, '#333333cc'))
+            css = self.CSS_FORMAT % (bg.red_float * 255, bg.green_float * 255, bg.blue_float * 255)
+            self.css.load_from_data(css)
+            self.set_opacity(bg.alpha_float)
         elif option == 'plugin/osd/display_duration':
             self.__options['display_duration'] = int(settings.get_option(option, 4))
         elif option == 'plugin/osd/show_progress':
