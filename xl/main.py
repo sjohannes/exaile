@@ -554,13 +554,20 @@ class Exaile(object):
             if self.options.StartGui and self.options.Dbus:
                 from xl import xldbus
 
-                exit = xldbus.check_exit(self.options, self.options.locs)
+                self.dbus = dbus = xldbus.DbusManager(self)
+                exit = xldbus.check_exit(self.options, self.options.locs, dbus)
                 if exit == "exit":
                     sys.exit(0)
                 elif exit == "command":
                     if not self.options.StartAnyway:
                         sys.exit(0)
-                self.dbus = xldbus.DbusManager(self)
+                ok = dbus.listen()
+                if not ok:
+                    logger.critical(
+                        "Failed creating D-Bus service. "
+                        "Check that your D-Bus daemon is working correctly, or run Exaile with --no-dbus (some functionality will be lost)."
+                    )
+                    sys.exit(0)
 
             # import version, see note above
             global __version__
@@ -580,7 +587,7 @@ class Exaile(object):
 
             # connect dbus signals
             if self.options.StartGui and self.options.Dbus:
-                self.dbus._connect_signals()
+                self.dbus.connect_signals()
 
             # On SIGTERM, quit normally.
             import signal
@@ -743,8 +750,9 @@ class Exaile(object):
                 if udisks.connect():
                     self.udisks = udisks
                 else:
-                    self.hal = hal.HAL(self.devices)
-                    self.hal.connect()
+                    hal = hal.HAL(self.devices)
+                    if hal.connect():
+                        self.hal = hal
         else:
             self.hal = None
 
@@ -846,14 +854,6 @@ class Exaile(object):
                 "Exaile requires PyGObject %d.%d.%d or greater! (got %d.%d.%d)",
                 *(MIN_VER + ver)
             )
-
-        if self.options.Dbus:
-            import dbus
-            import dbus.mainloop.glib
-
-            dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-            dbus.mainloop.glib.threads_init()
-            dbus.mainloop.glib.gthreads_init()
 
         if not self.options.StartGui:
             from gi.repository import GLib

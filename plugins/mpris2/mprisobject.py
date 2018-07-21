@@ -167,7 +167,10 @@ class MprisObject(object):
     def _on_playback_track_start(self, event, player, track):
         self._emit_propchange(
             'org.mpris.MediaPlayer2.Player',
-            {'Metadata': self.Metadata, 'PlaybackStatus': Variant('s', 'Playing')},
+            {
+                'Metadata': Variant('a{sv}', self.Metadata),
+                'PlaybackStatus': Variant('s', 'Playing'),
+            },
         )
 
     def _on_playback_track_end(self, event, player, track):
@@ -192,11 +195,11 @@ class MprisObject(object):
     def _on_player_option_set(self, event, settings, option):
         if option == 'player/volume':
             self._emit_propchange(
-                'org.mpris.MediaPlayer2.Player', {'Volume': self.Volume}
+                'org.mpris.MediaPlayer2.Player', {'Volume': Variant('d', self.Volume)}
             )
 
     def _return_true(self):  # Positive reply for the "Can*" properties
-        return Variant('b', True)
+        return True
 
     # Root properties
 
@@ -204,11 +207,11 @@ class MprisObject(object):
 
     @property
     def DesktopEntry(self):
-        return Variant('s', 'exaile')
+        return 'exaile'
 
     @property
     def FullScreen(self):
-        return Variant('b', self.exaile.gui.main.props.is_fullscreen)
+        return self.exaile.gui.main.props.is_fullscreen
 
     @FullScreen.setter
     def FullScreen(self, value):
@@ -216,11 +219,11 @@ class MprisObject(object):
 
     @property
     def HasTrackList(self):
-        return Variant('b', False)
+        return False
 
     @property
     def Identity(self):
-        return Variant('s', 'Exaile')
+        return 'Exaile'
 
     @property
     def SupportedMimeTypes(self):
@@ -255,13 +258,13 @@ class MprisObject(object):
             'application/x-flac',
             'audio/flac',
         ]
-        return Variant('as', mimetypes)
+        return mimetypes
 
     @property
     def SupportedUriSchemes(self):
         # TODO: Call GstUriHandler.get_protocols on all GStreamer sources
         # and check if there are other useful protocols.
-        return Variant('as', ['file', 'http', 'https', 'nfs', 'smb', 'sftp'])
+        return ['file', 'http', 'https', 'nfs', 'smb', 'sftp']
 
     # Root methods
 
@@ -283,45 +286,46 @@ class MprisObject(object):
         state = playlist.get_repeat_mode()
         state_map = {'disabled': 'None', 'all': 'Playlist', 'track': 'Track'}
         assert state in state_map
-        return Variant('s', state_map[state])
+        return state_map[state]
 
     @LoopStatus.setter
     def LoopStatus(self, value):
-        value_s = value.get_string()
         state_map = {'None': 'disabled', 'Playlist': 'all', 'Track': 'track'}
-        state = state_map.get(value_s)
+        state = state_map.get(value)
         if not state:
-            raise ValueError("invalid LoopStatus: %r" % value_s)
+            raise ValueError("invalid LoopStatus: %r" % value)
         playlist = xl.player.QUEUE.current_playlist
         playlist.set_repeat_mode(state)
         # TODO: Connect to actual event in playlist
-        self._emit_propchange('org.mpris.MediaPlayer2.Player', {'LoopStatus': value})
+        self._emit_propchange(
+            'org.mpris.MediaPlayer2.Player', {'LoopStatus': Variant('s', value)}
+        )
 
     @property
     def MaximumRate(self):
-        return Variant('d', 1)
+        return 1
 
     @property
     def Metadata(self):
-        return Variant('a{sv}', self._get_metadata())
+        return self._get_metadata()
 
     @property
     def MinimumRate(self):
-        return Variant('d', 1)
+        return 1
 
     @property
     def PlaybackStatus(self):
         state = xl.player.PLAYER.get_state()
         assert state in ('playing', 'paused', 'stopped')
-        return Variant('s', state.capitalize())
+        return state.capitalize()
 
     @property
     def Position(self):
-        return Variant('x', xl.player.PLAYER.get_time() * 1e6)
+        return xl.player.PLAYER.get_time() * 1e6
 
     @property
     def Rate(self):
-        return Variant('d', 1)
+        return 1
 
     @Rate.setter
     def Rate(self, value):
@@ -330,25 +334,24 @@ class MprisObject(object):
     @property
     def Shuffle(self):
         playlist = xl.player.QUEUE.current_playlist
-        return Variant('b', playlist.get_shuffle_mode() != 'disabled')
+        return playlist.get_shuffle_mode() != 'disabled'
 
     @Shuffle.setter
     def Shuffle(self, value):
-        value_b = value.get_boolean()
         playlist = xl.player.QUEUE.current_playlist
-        playlist.set_shuffle_mode('track' if value_b else 'disabled')
+        playlist.set_shuffle_mode('track' if value else 'disabled')
         # TODO: Connect to actual event in playlist
         self._emit_propchange(
-            'org.mpris.MediaPlayer2.Player', {'Shuffle': Variant('b', value_b)}
+            'org.mpris.MediaPlayer2.Player', {'Shuffle': Variant('b', value)}
         )
 
     @property
     def Volume(self):
-        return Variant('d', xl.settings.get_option('player/volume', 1))
+        return xl.settings.get_option('player/volume', 1)
 
     @Volume.setter
     def Volume(self, value):
-        xl.settings.set_option('player/volume', value.get_double())
+        xl.settings.set_option('player/volume', value)
 
     # Player methods
 

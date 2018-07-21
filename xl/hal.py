@@ -27,7 +27,8 @@
 import logging
 import threading
 import time
-import dbus
+
+from gi.repository import Gio, GLib
 
 from xl import common, providers, event
 
@@ -152,6 +153,7 @@ class UDisksBase(providers.ProviderHandler):
                 "devices will be disabled.",
                 self.name,
             )
+            logger.debug("Cause:", exc_info=True)
             return False
 
         self._state = 'addremove'
@@ -167,18 +169,25 @@ class UDisksBase(providers.ProviderHandler):
 
     def get_object_by_path(self, path):
         '''
-            Call this to retrieve a UDisksDBusWrapper object for the path
+            Call this to retrieve a Gio.DBusProxy object for the path
             of the object you want to retrieve.
 
             :param path: The udisks path of the object you want to retrieve
 
-            :returns: UDisksDBusWrapper object
+            :returns: Gio.DBusProxy object
             :raises: KeyError if the object path/type is not supported
         '''
 
-        for p, iface_type in self.paths:
+        for p, iface in self.path_interfaces:
             if path.startswith(p):
-                return UDisksDBusWrapper(self.bus, self.root, path, iface_type)
+                return Gio.DBusProxy.new_sync(
+                    self.conn,
+                    Gio.DBusProxyFlags.NONE,
+                    None,
+                    self.bus_name,
+                    path,
+                    iface,
+                )
 
         raise KeyError("Unsupported path %s" % path)
 
@@ -203,7 +212,10 @@ class UDisksBase(providers.ProviderHandler):
         assert self._state == 'addremove'
 
         if obj is None:
-            obj = self.get_object_by_path(path)
+            try:
+                obj = self.get_object_by_path(path)
+            except KeyError:
+                return
 
         # In the following code, `old` and `new` are providers, while
         # `self.devices[path]` and `device` are old/new devices. There are
@@ -245,7 +257,7 @@ class UDisksBase(providers.ProviderHandler):
 
         obj = self.get_object_by_path(path)
 
-        provider = self.providers.get(obj.object_path)
+        provider = self.providers.get(obj.get_object_path())
         if provider is None:
             self._add_device(path, obj)
         else:
@@ -261,7 +273,7 @@ class UDisksBase(providers.ProviderHandler):
         assert self._state == 'addremove'
         highest_prio = -1
         highest = None
-        old = self.providers.get(obj.object_path)
+        old = self.providers.get(obj.get_object_path())
         for provider in self.get_providers():
             priority = provider.get_priority(obj, self)
             if priority is None:
@@ -287,6 +299,8 @@ class UDisksBase(providers.ProviderHandler):
         if self._addremove():
             try:
                 self._add_device(path)
+            except KeyError:  # Not ours
+                pass
             finally:
                 self._state = 'listening'
                 logger.debug("%s: state = listening (_device_added)", self.name)
@@ -297,6 +311,8 @@ class UDisksBase(providers.ProviderHandler):
         if self._addremove():
             try:
                 self._on_change(path)
+            except KeyError:  # Not ours
+                pass
             finally:
                 self._state = 'listening'
                 logger.debug("%s: state = listening (_device_added)", self.name)
@@ -361,37 +377,52 @@ class UDisksBase(providers.ProviderHandler):
 class UDisks2(UDisksBase):
 
     name = 'udisks2'
-    root = 'org.freedesktop.UDisks2'
-    paths = [
+    bus_name = 'org.freedesktop.UDisks2'
+    path_interfaces = [
         ('/org/freedesktop/UDisks2/block_devices/', 'org.freedesktop.UDisks2.Block'),
         ('/org/freedesktop/UDisks2/drives/', 'org.freedesktop.UDisks2.Drive'),
-        ('/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager'),
     ]
 
     def _connect(self):
 
-        self.bus = dbus.SystemBus()
-        obj = self.get_object_by_path('/org/freedesktop/UDisks2')
+        self.conn = Gio.bus_get_sync(Gio.BusType.SYSTEM)
+        obj = Gio.DBusProxy.new_sync(
+            self.conn,
+            Gio.DBusProxyFlags.DO_NOT_AUTO_START,
+            None,
+            self.bus_name,
+            '/org/freedesktop/UDisks2',
+            'org.freedesktop.DBus.ObjectManager',
+        )
+        if obj.get_name_owner() is None:
+            raise Exception
 
-        obj.connect_to_signal('InterfacesAdded', self._udisks_device_added)
-        obj.connect_to_signal('InterfacesRemoved', self._udisks_device_removed)
+        obj.connect('g-signal', self.__on_udisks2_signal)
 
         # listen for PropertiesChanged events on any UDisks2 object
-        self.bus.add_signal_receiver(
-            self._udisks2_properties_changed,
-            signal_name='PropertiesChanged',
-            dbus_interface='org.freedesktop.DBus.Properties',
-            bus_name='org.freedesktop.UDisks2',
-            path_keyword='path',
+        self.conn.signal_subscribe(
+            'org.freedesktop.UDisks2',
+            'org.freedesktop.DBus.Properties',
+            'PropertiesChanged',
+            None,
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self.__on_udisks2_properties_changed,
         )
 
         return obj
 
-    def _udisks2_properties_changed(self, *args, **kwargs):
+    def __on_udisks2_signal(self, _proxy, _sender, signal, args):
+        if signal == 'InterfacesAdded':
+            self._udisks_device_added(*args)
+        elif signal == 'InterfacesRemoved':
+            self._udisks_device_removed(*args)
+
+    def __on_udisks2_properties_changed(self, _conn, _sender, path, _iface, _signal, _args):
         # TODO: this is inefficient, probably should just let the
         #       provider know what properties changed. would need
         #       to have the consumer let us know what to subscribe to
-        self._udisks_device_changed(kwargs['path'])
+        self._udisks_device_changed(path)
 
     def _add_all(self, obj):
         assert self._state == 'addremove'
@@ -402,20 +433,26 @@ class UDisks2(UDisksBase):
 class UDisks(UDisksBase):
 
     name = 'udisks'
-    root = 'org.freedesktop.UDisks'
-    paths = [
+    bus_name = 'org.freedesktop.UDisks'
+    path_interfaces = [
         ('/org/freedesktop/UDisks/drives', 'org.freedesktop.UDisks.Device'),
-        ('/org/freedesktop/UDisks', 'org.freedesktop.UDisks'),
     ]
 
     def _connect(self):
 
-        self.bus = dbus.SystemBus()
-        obj = self.get_object_by_path('/org/freedesktop/UDisks')
+        self.conn = Gio.bus_get_sync(Gio.BusType.SYSTEM)
+        obj = Gio.DBusProxy.new_sync(
+            self.conn,
+            Gio.DBusProxyFlags.DO_NOT_AUTO_START,
+            None,
+            self.bus_name,
+            '/org/freedesktop/UDisks',
+            'org.freedesktop.UDisks',
+        )
+        if obj.get_name_owner() is None:
+            raise Exception
 
-        obj.connect_to_signal('DeviceAdded', self._udisks_device_added)
-        obj.connect_to_signal('DeviceRemoved', self._udisks_device_removed)
-        obj.connect_to_signal('DeviceChanged', self._udisks_device_changed)
+        obj.connect('g-signal', self.__on_udisks_signal)
 
         return obj
 
@@ -423,6 +460,14 @@ class UDisks(UDisksBase):
         assert self._state == 'addremove'
         for path in obj.EnumerateDevices():
             self._add_device(path)
+
+    def __on_udisks_signal(self, _proxy, _sender, signal, args):
+        if signal == 'DeviceAdded':
+            self._udisks_device_added(args)
+        elif signal == 'DeviceRemoved':
+            self._udisks_device_removed(args)
+        elif signal == 'DeviceChanged':
+            self._udisks_device_changed(args)
 
 
 class HAL(providers.ProviderHandler):
@@ -434,33 +479,41 @@ class HAL(providers.ProviderHandler):
         providers.ProviderHandler.__init__(self, "hal")
         self.devicemanager = devicemanager
 
-        self.bus = None
-        self.hal = None
+        self.conn = self.manager = None
 
         self.hal_devices = {}
 
     @common.threaded
     def connect(self):
         try:
-            self.bus = dbus.SystemBus()
-            hal_obj = self.bus.get_object(
-                'org.freedesktop.Hal', '/org/freedesktop/Hal/Manager'
+            self.conn = Gio.bus_get_sync(Gio.BusType.SYSTEM)
+            self.manager = Gio.DBusProxy.new_sync(
+                self.conn,
+                Gio.DBusProxyFlags.DO_NOT_AUTO_START,
+                None,
+                'org.freedesktop.Hal',
+                '/org/freedesktop/Hal/Manager',
+                'org.freedesktop.Hal.Manager',
             )
-            self.hal = dbus.Interface(hal_obj, 'org.freedesktop.Hal.Manager')
+            if self.manager.get_name_owner() is None:
+                raise Exception
             logger.debug("HAL Providers: %r", self.get_providers())
             for p in self.get_providers():
                 try:
                     self.on_provider_added(p)
                 except Exception:
                     logger.exception("Failed to load HAL devices for %s", p.name)
-            self.setup_device_events()
+            self.manager.connect('g-signal', self.__on_hal_signal)
             logger.debug("Connected to HAL")
             event.log_event("hal_connected", self, None)
         except Exception:
-            logger.warning(
+            logger.exception(
                 "Failed to connect to HAL, "
                 "autodetection of devices will be disabled."
             )
+            logger.debug("Cause:", exc_info=True)
+            return False
+        return True
 
     def on_provider_added(self, provider):
         for udi in provider.get_udis(self):
@@ -470,13 +523,18 @@ class HAL(providers.ProviderHandler):
         pass  # TODO: disconnect and remove all devices of this type
 
     def get_handler(self, udi):
-        dev_obj = self.bus.get_object("org.freedesktop.Hal", udi)
-        device = dbus.Interface(dev_obj, "org.freedesktop.Hal.Device")
+        device = Gio.DBusProxy.new_sync(
+            self.conn,
+            Gio.DBusProxyFlags.DO_NOT_CONNECT_SIGNALS,
+            None,
+            'org.freedesktop.Hal',
+            udi,
+            'org.freedesktop.Hal.Device',
+        )
         try:
-            capabilities = device.GetProperty("info.capabilities")
-        except dbus.exceptions.DBusException as e:
-            if not e.get_dbus_name() == "org.freedesktop.Hal.NoSuchProperty":
-                logger.exception("info.capabilities property not set for %s", udi)
+            capabilities = device.GetPropertyStringList('(s)', 'info.capabilities')
+        except GLib.Error:
+            logger.exception("info.capabilities property not set for %s", udi)
             return None
         handlers = []
         for handler in self.get_providers():
@@ -517,9 +575,11 @@ class HAL(providers.ProviderHandler):
         except KeyError:
             pass
 
-    def setup_device_events(self):
-        self.bus.add_signal_receiver(self.add_device, "DeviceAdded")
-        self.bus.add_signal_receiver(self.remove_device, "DeviceRemoved")
+    def __on_hal_signal(self, _proxy, _sender, signal, args):
+        if signal == 'DeviceAdded':
+            self.add_device(args[0])
+        elif signal == 'DeviceRemoved':
+            self.remove_device(args[0])
 
 
 class Handler(object):

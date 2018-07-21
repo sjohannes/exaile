@@ -18,7 +18,7 @@ Essential:
 * gstreamer-plugins-base >= 1.6
 * gstreamer-plugins-good >= 1.4
 * mutagen (>= 1.10)
-* dbus-python
+* dbus
 * pygobject (>= 3.13.2)
 * python-cairo
 * GI typelib files for GTK+, GStreamer (including gstreamer-plugins-base) and cairo (python-gi-cairo on Ubuntu)

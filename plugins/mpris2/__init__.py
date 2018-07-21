@@ -27,7 +27,8 @@
 
 from gi.repository import Gio
 
-import dbushelper
+from xl import dbushelper
+
 import mprisobject
 
 
@@ -157,7 +158,9 @@ class MprisHandler:
     def _on_bus_acquired(self, connection, name):
         self.connection = connection
         self.object = obj = mprisobject.MprisObject(self.exaile, connection)
-        helper = dbushelper.DBusHelper(obj)
+        helper = dbushelper.ServiceHelper(
+            obj, [self.root_interface, self.player_interface]
+        )
         self.registrations.append(
             connection.register_object(
                 '/org/mpris/MediaPlayer2',

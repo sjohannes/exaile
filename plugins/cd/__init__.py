@@ -24,11 +24,12 @@
 # do so. If you do not wish to do so, delete this exception statement
 # from your version.
 
-import dbus
 from fcntl import ioctl
 import logging
 import os
 import struct
+
+from gi.repository import Gio
 
 from xl.nls import gettext as _
 from xl import providers, event
@@ -266,16 +267,22 @@ class HALCdProvider(Handler):
         return False
 
     def get_udis(self, hal):
-        udis = hal.hal.FindDeviceByCapability("volume.disc")
+        udis = hal.manager.FindDeviceByCapability('(s)', 'volume.disc')
         return udis
 
     def device_from_udi(self, hal, udi):
-        cd_obj = hal.bus.get_object("org.freedesktop.Hal", udi)
-        cd = dbus.Interface(cd_obj, "org.freedesktop.Hal.Device")
-        if not cd.GetProperty("volume.disc.has_audio"):
+        cd = Gio.DBusProxy.new_sync(
+            hal.conn,
+            Gio.DBusProxyFlags.DO_NOT_CONNECT_SIGNALS,
+            None,
+            'org.freedesktop.Hal',
+            udi,
+            'org.freedesktop.Hal.Device',
+        )
+        if not cd.get_cached_property("volume.disc.has_audio").get_boolean():
             return
 
-        device = str(cd.GetProperty("block.device"))
+        device = cd.get_cached_property("block.device").get_string()
 
         cddev = CDDevice(dev=device)
 
@@ -291,14 +298,14 @@ class UDisksCdProvider(UDisksProvider):
         # the second case, so use number of audio tracks to identify supported
         # media. As a bonus, this means we never have to care about the type of
         # disc (CD, DVD, etc.).
-        ntracks = obj.props.Get('OpticalDiscNumAudioTracks')
+        ntracks = obj.get_cached_property('OpticalDiscNumAudioTracks').get_uint32()
         return self.PRIORITY if ntracks > 0 else None
 
     def get_device(self, obj, udisks):
-        return CDDevice(str(obj.props.Get('DeviceFile')))
+        return CDDevice(obj.get_cached_property('DeviceFile').get_string())
 
     def on_device_changed(self, obj, udisks, device):
-        if obj.props.Get('OpticalDiscNumAudioTracks') <= 0:
+        if obj.get_cached_property('OpticalDiscNumAudioTracks').get_uint32() <= 0:
             return 'remove'
 
 
@@ -307,16 +314,16 @@ class UDisks2CdProvider(UDisksProvider):
     PRIORITY = UDisksProvider.NORMAL
 
     def _get_num_tracks(self, obj, udisks):
-        if obj.iface_type != 'org.freedesktop.UDisks2.Block':
+        if obj.get_interface_name() != 'org.freedesktop.UDisks2.Block':
             return
 
         try:
-            drive = udisks.get_object_by_path(obj.props.Get('Drive'))
+            drive = udisks.get_object_by_path(obj.get_cached_property('Drive').get_string())
         except KeyError:
             return
 
         # Use number of audio tracks to identify supported media
-        ntracks = drive.props.Get('OpticalNumAudioTracks')
+        ntracks = drive.get_cached_property('OpticalNumAudioTracks').get_uint32()
         if ntracks > 0:
             return ntracks
 
