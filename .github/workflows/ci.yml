@@ -5,6 +5,7 @@ on: [push, pull_request]
 jobs:
 
   lint:
+    timeout-minutes: 2
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -24,6 +25,7 @@ jobs:
           - fedora31-python3
           - ubuntu18.04-python3
           - ubuntu19.10-python3
+    timeout-minutes: 4
     runs-on: ubuntu-latest
     container: exaile/exaile-testimg:${{ matrix.imgtag }}
     steps:
@@ -41,6 +43,7 @@ jobs:
   deploy:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [lint, test]
+    timeout-minutes: 2
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -70,15 +73,25 @@ jobs:
             --notes "${notes}"
 
   notify:
-    if: failure() && github.repository_owner == 'exaile'
+    #if: failure() && github.repository_owner == 'exaile'
+    if: always()
     needs: [lint, test, deploy]
-    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    runs-on: ubuntu-20.04
     steps:
-      # TODO: Make this send IRC message
-      - name: Print status
+      - name: Send IRC notification
+        # This uses Bash's /dev/tcp: https://tldp.org/LDP/abs/html/devref1.html
         run: |
-          printf "%s | lint %s | test %s | deploy %s\n" \
+          exec 3<> /dev/tcp/chat.freenode.net/6667
+          printf \
+              'NICK exaile-ci\r\n'\
+              'USER exaile-ci 0 * :#exaile CI bot\r\n'\
+              'PRIVMSG #exaile :%s | lint %s | test %s | deploy %s | %s\r\n'\
+              'QUIT\r\n' \
             "${GITHUB_REF#refs/*/}" \
             '${{ needs.lint.result }}' \
             '${{ needs.test.result }}' \
-            '${{ needs.lint.result }}'
+            '${{ needs.lint.result }}' \
+            'http://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}' \
+            >&3
+          cat <&3
