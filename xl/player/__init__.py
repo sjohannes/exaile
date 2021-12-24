@@ -28,14 +28,14 @@
     Allows for playback and queue control
 """
 
-# __all__ = ['adapters', 'gst', 'queue', 'PLAYER', 'QUEUE']
+__all__ = ['adapters', 'gst', 'queue', 'PLAYER', 'QUEUE']
 
-# import os
+import os
 
-# from xl import xdg
+from xl import xdg
 
-# from . import player
-# from . import queue
+from . import player
+from . import queue
 
 # PLAYER = player.ExailePlayer('player')
 # QUEUE = queue.PlayQueue(
