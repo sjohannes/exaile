@@ -140,7 +140,7 @@ tests: List[List[TestData]] = [
 
 
 @pytest.mark.parametrize('test', tests)
-def test_fader(test: List[TestData]):
+def atest_fader(test: List[TestData]):
 
     # Test fade_out_on_play
 
@@ -199,7 +199,7 @@ def check_fader(test: List[TestData]):
             assert stream.volume == data.volume
 
 
-def atest_calculate_fades():
+def test_calculate_fades():
     fader = TrackFader(None, None, None)
 
     # fin, fout, start_off, stop_off, tracklen;
