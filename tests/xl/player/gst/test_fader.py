@@ -5,7 +5,7 @@ from unittest.mock import patch
 from gi.repository import GLib
 import pytest
 
-# from xl.player.track_fader import TrackFader, FadeState
+from xl.player.track_fader import TrackFader, FadeState
 
 # NoFade = FadeState.NoFade
 # FadingIn = FadeState.FadingIn
