@@ -24,15 +24,18 @@
 # do so. If you do not wish to do so, delete this exception statement
 # from your version.
 
+from enum import Enum
+import logging
 from typing import Tuple
 
 from gi.repository import GLib
 
-from xl import common
 
-import logging
-
-FadeState = common.enum(NoFade=1, FadingIn=2, Normal=3, FadingOut=4)
+class FadeState(Enum):
+    NoFade = 1
+    FadingIn = 2
+    Normal = 3
+    FadingOut = 4
 
 
 class TrackFader:

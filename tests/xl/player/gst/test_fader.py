@@ -1,3 +1,7 @@
+from enum import Enum
+from typing import List, NamedTuple, Tuple, Optional
+from unittest.mock import patch
+
 from gi.repository import GLib
 import pytest
 
@@ -44,104 +48,99 @@ class FakeTrack:
         return self.tags[t]
 
 
-# TODO: monkeypatch instead
-timeout_args = [()]
+class Tm(Enum):
+    """The function queued by the last GLib.timeout_add call"""
+
+    St = TrackFader._on_fade_start
+    Ex = TrackFader._execute_fade
 
 
-def glib_timeout_add(*args):
-    timeout_args[0] = args[2:]
-    return args[1]
+class TestData(NamedTuple):
+    position: float
+    volume: float
+    state: FadeState
+    timeout_func: Optional[Tm]
+    action: Optional[str] = None
+    args: Tuple = ()
 
-
-def glib_source_remove(src_id):
-    pass
-
-
-GLib.timeout_add = glib_timeout_add
-GLib.source_remove = glib_source_remove
-
-TmSt = 1
-TmEx = 2
-
-
-# Test data:
-#   Position, Volume, State, TmSt/TmEx/None, [call, [arg1...]]
 
 # fmt: off
-@pytest.mark.parametrize('test', [
-
+tests: List[List[TestData]] = [
     # Test don't manage the volume
     [
-        (0, 100, NoFade, None, 'play', None, None, None, None),
-        (1, 100, NoFade, None, 'pause'),
-        (2, 100, NoFade, None, 'unpause'),
-        (3, 100, NoFade, None, 'seek', 4),
-        (4, 100, NoFade, None, 'stop'),
-        (5, 100, NoFade, None),
+        TestData(0, 100, NoFade, None, 'play', (None, None, None, None)),
+        TestData(1, 100, NoFade, None, 'pause'),
+        TestData(2, 100, NoFade, None, 'unpause'),
+        TestData(3, 100, NoFade, None, 'seek', (4,)),
+        TestData(4, 100, NoFade, None, 'stop'),
+        TestData(5, 100, NoFade, None),
     ],
 
     # Test fading in
     [
-        (0, 0,  FadingIn, TmEx, 'play', 0, 2, None, None),
-        (1, 50, FadingIn, TmEx, 'execute'),
-        (3, 100, NoFade,  None, 'execute'),
-        (4, 100, NoFade,  None),
-        (5, 100, NoFade,  None, 'stop'),
-        (6, 100, NoFade,  None),
+        TestData(0, 0,  FadingIn, Tm.Ex, 'play', (0, 2, None, None)),
+        TestData(1, 50, FadingIn, Tm.Ex, 'execute'),
+        TestData(3, 100, NoFade,  None,  'execute'),
+        TestData(4, 100, NoFade,  None),
+        TestData(5, 100, NoFade,  None,  'stop'),
+        TestData(6, 100, NoFade,  None),
     ],
 
     # Test fading in: pause in middle
     [
-        (0, 0,  FadingIn, TmEx, 'play', 0, 2, None, None),
-        (1, 50, FadingIn, TmEx, 'execute'),
-        (1, 50, FadingIn, None, 'pause'),
-        (1, 50, FadingIn, TmEx, 'unpause'),
-        (1, 50, FadingIn, TmEx, 'execute'),
-        (3, 100, NoFade,  None, 'execute'),
-        (4, 100, NoFade,  None),
-        (5, 100, NoFade,  None, 'stop'),
-        (6, 100, NoFade,  None),
+        TestData(0, 0,  FadingIn, Tm.Ex, 'play', (0, 2, None, None)),
+        TestData(1, 50, FadingIn, Tm.Ex, 'execute'),
+        TestData(1, 50, FadingIn, None,  'pause'),
+        TestData(1, 50, FadingIn, Tm.Ex, 'unpause'),
+        TestData(1, 50, FadingIn, Tm.Ex, 'execute'),
+        TestData(3, 100, NoFade,  None,  'execute'),
+        TestData(4, 100, NoFade,  None),
+        TestData(5, 100, NoFade,  None,  'stop'),
+        TestData(6, 100, NoFade,  None),
     ],
 
     # Test fading in past the fade point
     [
-        (3, 100, NoFade, None, 'play', 0, 2, None, None),
-        (4, 100, NoFade, None),
-        (5, 100, NoFade, None, 'stop'),
-        (6, 100, NoFade, None),
+        TestData(3, 100, NoFade, None, 'play', (0, 2, None, None)),
+        TestData(4, 100, NoFade, None),
+        TestData(5, 100, NoFade, None, 'stop'),
+        TestData(6, 100, NoFade, None),
     ],
 
     # Test fading out
     [
-        (3, 100, Normal,    TmSt, 'play', None, None, 4, 6),
-        (4, 100, FadingOut, TmEx, 'start'),
-        (5, 50,  FadingOut, TmEx, 'execute'),
-        (6, 0,   FadingOut, TmEx, 'execute'),
-        (6.1, 0, NoFade,    None, 'execute'),
-        (7,   0, NoFade,    None),
+        TestData(3, 100, Normal,    Tm.St, 'play', (None, None, 4, 6)),
+        TestData(4, 100, FadingOut, Tm.Ex, 'start'),
+        TestData(5, 50,  FadingOut, Tm.Ex, 'execute'),
+        TestData(6, 0,   FadingOut, Tm.Ex, 'execute'),
+        TestData(6.1, 0, NoFade,    None,  'execute'),
+        TestData(7,   0, NoFade,    None),
     ],
 
     # Test all of them
     [
-        (0, 0,  FadingIn,   TmEx, 'play', 0, 2, 4, 6),
-        (1, 50, FadingIn,   TmEx, 'execute'),
-        (3, 100, Normal,    TmSt, 'execute'),
-        (4, 100, FadingOut, TmEx, 'start'),
-        (5, 50,  FadingOut, TmEx, 'execute'),
-        (6, 0,   FadingOut, TmEx, 'execute'),
-        (6.1, 0, NoFade,    None, 'execute'),
-        (7,   0, NoFade,    None),
+        TestData(0, 0,  FadingIn,   Tm.Ex, 'play', (0, 2, 4, 6)),
+        TestData(1, 50, FadingIn,   Tm.Ex, 'execute'),
+        TestData(3, 100, Normal,    Tm.St, 'execute'),
+        TestData(4, 100, FadingOut, Tm.Ex, 'start'),
+        TestData(5, 50,  FadingOut, Tm.Ex, 'execute'),
+        TestData(6, 0,   FadingOut, Tm.Ex, 'execute'),
+        TestData(6.1, 0, NoFade,    None,  'execute'),
+        TestData(7,   0, NoFade,    None),
     ],
 
     # Test fading in with startoffset
     # [
-    #     (0, 0,  FadingIn,  TmEx, 'play', 60, 62, 64, 66),
-    #     (0, 0,  FadingIn,  TmEx, 'seek', 60),
-    #     (61, 50,  FadingIn,  TmEx, 'execute'),
+    #     TestData(0, 0,   FadingIn, Tm.Ex, 'play', (60, 62, 64, 66)),
+    #     TestData(0, 0,   FadingIn, Tm.Ex, 'seek', (60,)),
+    #     TestData(61, 50, FadingIn, Tm.Ex, 'execute'),
     # ],
-])
+]
 # fmt: on
-def test_fader(test):
+
+
+@pytest.mark.parametrize('test', tests)
+def test_fader(test: List[TestData]):
 
     # Test fade_out_on_play
 
@@ -154,45 +153,50 @@ def test_fader(test):
     check_fader(test)
 
 
-def check_fader(test):
+def check_fader(test: List[TestData]):
     stream = FakeStream()
     fader = TrackFader(stream, stream.on_fade_out, 'test')
 
-    for data in test:
-        print(data)
-        now = data[0]
-        stream.position = int(now * TrackFader.SECOND)
-        print(stream.position)
-        volume = data[1]
-        state = data[2]
-        timer_id = data[3]
+    timeout_args: Tuple = ()
 
-        if len(data) > 4:
-            action = data[4]
-            args = data[5:] if len(data) > 5 else ()
+    def glib_timeout_add(_interval, function, *args):
+        import types
 
-            if action == 'start':
-                action = '_on_fade_start'
-            elif action == 'execute':
-                action = '_execute_fade'
-                args = timeout_args[0]
-                fader.now = now - 0.010
+        nonlocal timeout_args
+        timeout_args = args
+        # If the function is a method, unbind it
+        return function.__func__ if type(function) is types.MethodType else function
 
-            # Call the function
-            getattr(fader, action)(*args)
+    def glib_source_remove(_src_id):
+        pass
 
-        # Check to see if timer id exists
-        if timer_id is None:
-            assert fader.timer_id is None
-        elif timer_id == TmSt:
-            assert fader.timer_id == fader._on_fade_start
-        elif timer_id == TmEx:
-            assert fader.timer_id == fader._execute_fade
-        else:
-            assert False
+    with patch.multiple(
+        GLib, timeout_add=glib_timeout_add, source_remove=glib_source_remove
+    ):
+        for data in test:
+            print(data)
+            stream.position = int(data.position * TrackFader.SECOND)
+            print(stream.position)
 
-        assert fader.state == state
-        assert stream.volume == volume
+            if data.action is not None:
+                action = data.action
+                args = data.args
+                if action == 'start':
+                    action = '_on_fade_start'
+                elif action == 'execute':
+                    action = '_execute_fade'
+                    args = timeout_args
+                    fader.now = data.position - 0.010
+
+                # Call the function
+                getattr(fader, action)(*args)
+
+            # Our GLib.timeout_add mock above returns the timeout function (instead of a
+            # numeric ID). This function then gets assigned to TrackFader.timer_id.
+            assert fader.timer_id is data.timeout_func
+
+            assert fader.state == data.state
+            assert stream.volume == data.volume
 
 
 def test_calculate_fades():
@@ -202,7 +206,7 @@ def test_calculate_fades():
     # start, start+fade, end-fade, end
     calcs = [
         # fmt: off
-        
+
         # one is zero/none
         (0, 4, 0, 0, 10,        0, 0, 6, 10),
         (None, 4, 0, 0, 10,     0, 0, 6, 10),
