@@ -1,5 +1,9 @@
+from gi.repository import GLib
+
+
 def test_a():
     pass
+
 
 # from enum import Enum
 # from typing import List, NamedTuple, Tuple, Optional
