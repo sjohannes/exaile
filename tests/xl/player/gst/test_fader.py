@@ -1,16 +1,9 @@
+from enum import Enum
+from typing import List, NamedTuple, Tuple, Optional
+from unittest.mock import patch
+
 from gi.repository import GLib
-
-
-def test_a():
-    pass
-
-
-# from enum import Enum
-# from typing import List, NamedTuple, Tuple, Optional
-# from unittest.mock import patch
-
-# from gi.repository import GLib
-# import pytest
+import pytest
 
 # from xl.player.track_fader import TrackFader, FadeState
 
